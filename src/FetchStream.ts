@@ -1,5 +1,9 @@
 import fetch, { RequestInit, Response } from "node-fetch";
-import { createParser, ParsedEvent, ReconnectInterval } from "eventsource-parser";
+import {
+  createParser,
+  ParsedEvent,
+  ReconnectInterval,
+} from "eventsource-parser";
 import { window } from "vscode";
 
 export interface FetchStreamOptions {
@@ -32,27 +36,31 @@ export class FetchStream {
         this.onmessage(event.data);
       }
     });
-
+    console.log("start");
     fetch(this.url, this.requestInit)
-      .then(response => {
+      .then((response) => {
+        console.log({ response });
         if (response.status === 200) {
           return response.body!;
         } else {
           return Promise.reject(response);
         }
-      }).then(async (readableStream) => {
+      })
+      .then(async (readableStream) => {
         for await (const chunk of readableStream) {
           parser.feed(chunk.toString());
         }
-      }).then(() => {
+      })
+      .then(() => {
         this.ondone?.();
-      }).catch(error => {
+      })
+      .catch((error) => {
+        console.log("1231231239999");
+
         console.error(error);
         window.showErrorMessage(`${error}`);
         window.setStatusBarMessage(`${error}`, 10000);
         this.onerror?.(error);
       });
   }
-
-
 }

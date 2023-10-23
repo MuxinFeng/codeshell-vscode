@@ -1,223 +1,263 @@
 import * as vscode from "vscode";
 import * as prompt from "./CreatePrompt";
-import { ChatItem, HumanMessage, AIMessage, SessionItem, SessionStore } from "./ChatMemory";
+import {
+  ChatItem,
+  HumanMessage,
+  AIMessage,
+  SessionItem,
+  SessionStore,
+} from "./ChatMemory";
 import { postEventStream, stopEventStream } from "./RequestEventStream";
 
-export class CodeShellWebviewViewProvider implements vscode.WebviewViewProvider {
-	public static readonly viewId = "codeshell.chatView";
-	private _view?: vscode.WebviewView;
-	private _extensionUri: vscode.Uri;
+export class CodeShellWebviewViewProvider
+  implements vscode.WebviewViewProvider
+{
+  public static readonly viewId = "codeshell.chatView";
+  private _view?: vscode.WebviewView;
+  private _extensionUri: vscode.Uri;
 
-	private sessionStore: SessionStore;
-	private sessionItem: SessionItem = new SessionItem();
+  private sessionStore: SessionStore;
+  private sessionItem: SessionItem = new SessionItem();
 
-	constructor(private readonly _extensionContext: vscode.ExtensionContext) {
-		this._extensionUri = _extensionContext.extensionUri;
-		this.sessionStore = new SessionStore(_extensionContext);
-	}
+  constructor(private readonly _extensionContext: vscode.ExtensionContext) {
+    this._extensionUri = _extensionContext.extensionUri;
+    this.sessionStore = new SessionStore(_extensionContext);
+  }
 
-	public resolveWebviewView(webviewView: vscode.WebviewView,
-		_context: vscode.WebviewViewResolveContext,
-		_token: vscode.CancellationToken) {
+  public resolveWebviewView(
+    webviewView: vscode.WebviewView,
+    _context: vscode.WebviewViewResolveContext,
+    _token: vscode.CancellationToken
+  ) {
+    this._view = webviewView;
+    // set options for the webview, allow scripts
+    webviewView.webview.options = {
+      enableScripts: true,
+      localResourceRoots: [this._extensionUri],
+    };
 
-		this._view = webviewView;
-		// set options for the webview, allow scripts
-		webviewView.webview.options = {
-			enableScripts: true,
-			localResourceRoots: [
-				this._extensionUri
-			]
-		};
+    // set the HTML for the webview
+    webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
 
-		// set the HTML for the webview
-		webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
+    // add an event listener for messages received by the webview
+    webviewView.webview.onDidReceiveMessage((data) => {
+      switch (data.type) {
+        case "codeBlockInsert": {
+          let code = data.value;
+          //code = code.replace(/([^\\])(\$)([^{0-9])/g, "$1\\$$$3");
+          const snippet = new vscode.SnippetString();
+          snippet.appendText(code);
+          // insert the code as a snippet into the active text editor
+          vscode.window.activeTextEditor?.insertSnippet(snippet);
+          break;
+        }
+        case "startQuestion": {
+          this.startQuestion(data.value);
+          break;
+        }
+        case "startNewSession": {
+          this.sessionStore.update(this.sessionItem);
+          this.sessionItem = new SessionItem();
+          break;
+        }
+        case "showSessionHistory": {
+          this.showSessionHistory();
+          break;
+        }
+        case "sessionItemClicked": {
+          this.sessionItemClicked(data.value);
+          break;
+        }
+        case "sessionItemDelete": {
+          this.sessionItemDelete(data.value);
+          break;
+        }
+        case "regenerateThisAnswer": {
+          this.generateAnswer(data.value);
+          break;
+        }
+        case "stopGenerationStream": {
+          this.stopGenerationStream();
+          break;
+        }
+      }
+    });
+  }
 
-		// add an event listener for messages received by the webview
-		webviewView.webview.onDidReceiveMessage(data => {
-			switch (data.type) {
-				case "codeBlockInsert": {
-					let code = data.value;
-					//code = code.replace(/([^\\])(\$)([^{0-9])/g, "$1\\$$$3");
-					const snippet = new vscode.SnippetString();
-					snippet.appendText(code);
-					// insert the code as a snippet into the active text editor
-					vscode.window.activeTextEditor?.insertSnippet(snippet);
-					break;
-				}
-				case "startQuestion": {
-					this.startQuestion(data.value);
-					break;
-				}
-				case "startNewSession": {
-					this.sessionStore.update(this.sessionItem);
-					this.sessionItem = new SessionItem();
-					break;
-				}
-				case "showSessionHistory": {
-					this.showSessionHistory();
-					break;
-				}
-				case "sessionItemClicked": {
-					this.sessionItemClicked(data.value);
-					break;
-				}
-				case "sessionItemDelete": {
-					this.sessionItemDelete(data.value);
-					break;
-				}
-				case "regenerateThisAnswer": {
-					this.generateAnswer(data.value);
-					break;
-				}
-				case "stopGenerationStream": {
-					this.stopGenerationStream();
-					break;
-				}
-			}
-		});
-	}
+  public async executeCommand(command: string) {
+    // Get the selected text of the active editor
+    const selection = vscode.window.activeTextEditor?.selection;
+    const selectedText =
+      vscode.window.activeTextEditor?.document.getText(selection);
+    if (!selectedText) {
+      vscode.window.showErrorMessage("请选中一段代码！");
+      return;
+    }
+    const languageId = vscode.window.activeTextEditor?.document.languageId;
+    if (!languageId) {
+      vscode.window.showErrorMessage("无法确定语言类型！");
+      return;
+    }
 
-	public async executeCommand(command: string) {
-		// Get the selected text of the active editor
-		const selection = vscode.window.activeTextEditor?.selection;
-		const selectedText = vscode.window.activeTextEditor?.document.getText(selection);
-		if (!selectedText) {
-			vscode.window.showErrorMessage("请选中一段代码！");
-			return;
-		}
-		const languageId = vscode.window.activeTextEditor?.document.languageId;
-		if (!languageId) {
-			vscode.window.showErrorMessage("无法确定语言类型！");
-			return;
-		}
+    let humanPrompt = "";
+    switch (command) {
+      case "codeshell.explain_this_code": {
+        humanPrompt = prompt.createPromptCodeExplain(languageId, selectedText);
+        break;
+      }
+      case "codeshell.improve_this_code": {
+        humanPrompt = prompt.createPromptCodeImprove(languageId, selectedText);
+        break;
+      }
+      case "codeshell.clean_this_code": {
+        humanPrompt = prompt.createPromptCodeClean(languageId, selectedText);
+        break;
+      }
+      case "codeshell.generate_comment": {
+        humanPrompt = prompt.createPromptGenerateComment(
+          languageId,
+          selectedText
+        );
+        break;
+      }
+      case "codeshell.generate_unit_test": {
+        humanPrompt = prompt.createPromptGenerateUnitTest(
+          languageId,
+          selectedText
+        );
+        break;
+      }
+      case "codeshell.check_performance": {
+        humanPrompt = prompt.createPromptCheckPerformance(
+          languageId,
+          selectedText
+        );
+        break;
+      }
+      case "codeshell.check_security": {
+        humanPrompt = prompt.createPromptCheckSecurity(
+          languageId,
+          selectedText
+        );
+        break;
+      }
+    }
 
-		let humanPrompt = "";
-		switch (command) {
-			case "codeshell.explain_this_code": {
-				humanPrompt = prompt.createPromptCodeExplain(languageId, selectedText);
-				break;
-			}
-			case "codeshell.improve_this_code": {
-				humanPrompt = prompt.createPromptCodeImprove(languageId, selectedText);
-				break;
-			}
-			case "codeshell.clean_this_code": {
-				humanPrompt = prompt.createPromptCodeClean(languageId, selectedText);
-				break;
-			}
-			case "codeshell.generate_comment": {
-				humanPrompt = prompt.createPromptGenerateComment(languageId, selectedText);
-				break;
-			}
-			case "codeshell.generate_unit_test": {
-				humanPrompt = prompt.createPromptGenerateUnitTest(languageId, selectedText);
-				break;
-			}
-			case "codeshell.check_performance": {
-				humanPrompt = prompt.createPromptCheckPerformance(languageId, selectedText);
-				break;
-			}
-			case "codeshell.check_security": {
-				humanPrompt = prompt.createPromptCheckSecurity(languageId, selectedText);
-				break;
-			}
-		}
+    // focus gpt activity from activity bar
+    if (!this._view) {
+      await vscode.commands.executeCommand("codeshell.chatView.focus");
+    } else {
+      this._view?.show?.(true);
+    }
+    this.startQuestion(humanPrompt);
+  }
 
-		// focus gpt activity from activity bar
-		if (!this._view) {
-			await vscode.commands.executeCommand("codeshell.chatView.focus");
-		} else {
-			this._view?.show?.(true);
-		}
-		this.startQuestion(humanPrompt);
-	}
+  private startQuestion(question: string) {
+    const contentIndex = this.sessionItem.chatList.length;
+    const divContent = this._makeQuestionAnswerDiv(contentIndex);
+    const eventData = {
+      divContent: divContent,
+      contentIndex: contentIndex,
+      question: question,
+    };
+    this._view?.webview.postMessage({
+      type: "addQuestionAnswerDiv",
+      value: eventData,
+    });
 
-	private startQuestion(question: string) {
-		const contentIndex = this.sessionItem.chatList.length;
-		const divContent = this._makeQuestionAnswerDiv(contentIndex);
-		const eventData = {
-			"divContent": divContent,
-			"contentIndex": contentIndex,
-			"question": question
-		};
-		this._view?.webview.postMessage({ type: "addQuestionAnswerDiv", value: eventData });
+    const humanMessage = new HumanMessage(question);
+    const aiMessage = new AIMessage("");
+    const chatItem = new ChatItem(humanMessage, aiMessage);
+    this.sessionItem.addChatItem(chatItem);
+    this.generateAnswer(contentIndex);
+  }
 
-		const humanMessage = new HumanMessage(question);
-		const aiMessage = new AIMessage("");
-		const chatItem = new ChatItem(humanMessage, aiMessage);
-		this.sessionItem.addChatItem(chatItem);
-		this.generateAnswer(contentIndex);
-	}
+  private generateAnswer(index: number) {
+    const chatItem = this.sessionItem.chatList[index];
+    chatItem.aiMessage.content = "";
+    this.sessionStore.update(this.sessionItem);
+    const historyPrompt = this.sessionItem.getSlicePrompt(0, index);
+    const respData = {
+      contentIndex: index,
+      responseText: chatItem.aiMessage.content,
+      aiMsgId: chatItem.aiMsgId,
+    };
+    console.log("historyPrompt:", historyPrompt);
+    postEventStream(
+      historyPrompt,
+      (data) => {
+        const jsonData = JSON.parse(data);
+        if (jsonData.content) {
+          chatItem.aiMessage.append(jsonData.content);
+        }
+        if (jsonData.id && jsonData.id !== "0") {
+          console.log(`AI message id = ${jsonData.id}`);
+          chatItem.aiMsgId = jsonData.id;
+        }
+        respData.responseText = chatItem.aiMessage.content;
+        respData.aiMsgId = chatItem.aiMsgId;
+        this._view?.webview.postMessage({
+          type: "addStreamResponse",
+          value: respData,
+        });
+      },
+      () => {
+        console.log("generateAnswer.requstsDone:", chatItem.aiMessage.content);
+        this.sessionStore.update(this.sessionItem);
+        this._view?.webview.postMessage({
+          type: "responseStreamDone",
+          value: respData,
+        });
+        vscode.window.showInformationMessage("回答输出完毕!");
+      },
+      (_err) => {
+        this.sessionStore.update(this.sessionItem);
+        this._view?.webview.postMessage({
+          type: "responseStreamDone",
+          value: respData,
+        });
+      }
+    );
+  }
 
-	private generateAnswer(index: number) {
-		const chatItem = this.sessionItem.chatList[index];
-		chatItem.aiMessage.content = "";
-		this.sessionStore.update(this.sessionItem);
-		const historyPrompt = this.sessionItem.getSlicePrompt(0, index);
-		const respData = {
-			"contentIndex": index,
-			"responseText": chatItem.aiMessage.content,
-			"aiMsgId": chatItem.aiMsgId,
-		};
-		console.log("historyPrompt:", historyPrompt);
-		postEventStream(historyPrompt, (data) => {
-			const jsonData = JSON.parse(data);
-			if (jsonData.content) {
-				chatItem.aiMessage.append(jsonData.content);
-			}
-			if (jsonData.id && jsonData.id !== "0") {
-				console.log(`AI message id = ${jsonData.id}`);
-				chatItem.aiMsgId = jsonData.id;
-			}
-			respData.responseText = chatItem.aiMessage.content;
-			respData.aiMsgId = chatItem.aiMsgId;
-			this._view?.webview.postMessage({ type: "addStreamResponse", value: respData });
-		}, () => {
-			console.log("generateAnswer.requstsDone:", chatItem.aiMessage.content);
-			this.sessionStore.update(this.sessionItem);
-			this._view?.webview.postMessage({ type: "responseStreamDone", value: respData });
-			vscode.window.showInformationMessage("回答输出完毕!");
-		}, (_err) => {
-			this.sessionStore.update(this.sessionItem);
-			this._view?.webview.postMessage({ type: "responseStreamDone", value: respData });
-		});
-	}
+  private stopGenerationStream() {
+    stopEventStream();
+  }
 
-	private stopGenerationStream() {
-		stopEventStream();
-	}
+  private sessionItemClicked(itemId: string) {
+    const sessionItem = this.sessionStore.getSessionItemById(itemId);
+    this.sessionItem = sessionItem;
+    this._makeQuestionAnswerDivFromSessionItem(sessionItem);
+  }
 
-	private sessionItemClicked(itemId: string) {
-		const sessionItem = this.sessionStore.getSessionItemById(itemId);
-		this.sessionItem = sessionItem;
-		this._makeQuestionAnswerDivFromSessionItem(sessionItem);
-	}
+  private sessionItemDelete(itemId: string) {
+    const sessionItem = this.sessionStore.getSessionItemById(itemId);
+    this.sessionStore.delete(sessionItem);
+    this.showSessionHistory();
+  }
 
-	private sessionItemDelete(itemId: string) {
-		const sessionItem = this.sessionStore.getSessionItemById(itemId);
-		this.sessionStore.delete(sessionItem);
-		this.showSessionHistory();
-	}
+  private showSessionHistory() {
+    var html = this._makeHistoryDiv();
+    this._view?.webview.postMessage({
+      type: "historySessionDone",
+      value: html,
+    });
+  }
 
-	private showSessionHistory() {
-		var html = this._makeHistoryDiv();
-		this._view?.webview.postMessage({ type: "historySessionDone", value: html });
-	}
+  private _makeHistoryDiv() {
+    let history = this.sessionStore.getSessionHistory();
 
-	private _makeHistoryDiv() {
-		let history = this.sessionStore.getSessionHistory();
+    let html = "";
+    for (const item of history) {
+      html += this._makeHistoryItemDiv(item);
+    }
+    return html;
+  }
 
-		let html = "";
-		for (const item of history) {
-			html += this._makeHistoryItemDiv(item);
-		}
-		return html;
-	}
+  private _makeHistoryItemDiv(sessionItem: SessionItem) {
+    const sessionTime = sessionItem.time.toLocaleString();
 
-	private _makeHistoryItemDiv(sessionItem: SessionItem) {
-		const sessionTime = sessionItem.time.toLocaleString();
-
-		return `
+    return `
 			<div class="session" id="${sessionItem.id}">
 				<div class="session-item">
 					<p class="session-title"> ${sessionItem.title} </p>
@@ -230,22 +270,25 @@ export class CodeShellWebviewViewProvider implements vscode.WebviewViewProvider 
 				</div>
 			</div>
 		`;
-	}
+  }
 
-	private _makeQuestionAnswerDivFromSessionItem(sessionItem: SessionItem) {
-		let html = "";
-		for (let i = 0; i < sessionItem.chatList.length; i++) {
-			html += this._makeQuestionAnswerDiv(i);
-		}
-		const eventData = {
-			"divContent": html,
-			"chatList": sessionItem.chatList
-		};
-		this._view?.webview.postMessage({ type: "historyQuestionAnswerDone", value: eventData });
-	}
+  private _makeQuestionAnswerDivFromSessionItem(sessionItem: SessionItem) {
+    let html = "";
+    for (let i = 0; i < sessionItem.chatList.length; i++) {
+      html += this._makeQuestionAnswerDiv(i);
+    }
+    const eventData = {
+      divContent: html,
+      chatList: sessionItem.chatList,
+    };
+    this._view?.webview.postMessage({
+      type: "historyQuestionAnswerDone",
+      value: eventData,
+    });
+  }
 
-	private _makeQuestionAnswerDiv(contentIndex: number) {
-		return `
+  private _makeQuestionAnswerDiv(contentIndex: number) {
+    return `
 		<div id="qa_section_div_${contentIndex}"
 			class="qa-section-div-main focus-on-tab" style="border-bottom: 0.5px solid #626668; padding: 5px 5px">
 			<div class="question-container col-12">
@@ -308,21 +351,44 @@ export class CodeShellWebviewViewProvider implements vscode.WebviewViewProvider 
 			</div>
 		</div>
 		`;
-	}
+  }
 
-	private _getHtmlForWebview(webview: vscode.Webview) {
+  private _getHtmlForWebview(webview: vscode.Webview) {
+    const mainScriptUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this._extensionUri, "media", "main.js")
+    );
+    const hightlightUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(
+        this._extensionUri,
+        "media",
+        "scripts",
+        "highlight.min.js"
+      )
+    );
+    const showdownUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(
+        this._extensionUri,
+        "media",
+        "scripts",
+        "showdown.min.js"
+      )
+    );
+    const tailwindUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(
+        this._extensionUri,
+        "media",
+        "scripts",
+        "tailwind.min.js"
+      )
+    );
 
-		const mainScriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, "media", "main.js"));
-		const hightlightUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, "media", "scripts", "highlight.min.js"));
-		const showdownUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, "media", "scripts", "showdown.min.js"));
-		const tailwindUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, "media", "scripts", "tailwind.min.js"));
+    const styleUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this._extensionUri, "media", "styles")
+    );
 
-		const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(this._extensionUri, "media", "styles"));
+    const historySessionItems = this._makeHistoryDiv();
 
-		const historySessionItems = this._makeHistoryDiv();
-
-
-		return `<!DOCTYPE html>
+    return `<!DOCTYPE html>
 		<html lang="en">
 		
 		<head>
@@ -490,5 +556,5 @@ export class CodeShellWebviewViewProvider implements vscode.WebviewViewProvider 
 		</body>
 		
 		</html>`;
-	}
+  }
 }
