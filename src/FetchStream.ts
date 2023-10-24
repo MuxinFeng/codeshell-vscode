@@ -36,10 +36,15 @@ export class FetchStream {
         this.onmessage(event.data);
       }
     });
-    console.log("start");
+    console.warn("start");
+    console.warn("url", this.url);
+    console.warn("requestInit", this.requestInit);
+
     fetch(this.url, this.requestInit)
       .then((response) => {
-        console.log({ response });
+        console.warn({ response });
+        console.warn("body", response.body);
+        return response.body;
         if (response.status === 200) {
           return response.body!;
         } else {
@@ -47,7 +52,13 @@ export class FetchStream {
         }
       })
       .then(async (readableStream) => {
+        console.warn(readableStream);
+        if (!readableStream) {
+          console.warn("readableStream 为 null");
+          return Promise.reject(readableStream);
+        }
         for await (const chunk of readableStream) {
+          console.warn({ chunk });
           parser.feed(chunk.toString());
         }
       })
@@ -55,8 +66,7 @@ export class FetchStream {
         this.ondone?.();
       })
       .catch((error) => {
-        console.log("1231231239999");
-
+        console.warn("报错了");
         console.error(error);
         window.showErrorMessage(`${error}`);
         window.setStatusBarMessage(`${error}`, 10000);

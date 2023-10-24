@@ -30,7 +30,7 @@
       "properties": {
         "CodeShell.ServerAddress": {
           "description": "The address of the CodeShell server to connect to.",
-          "default": "http://localhost:8080",
+          "default": "http://rubick-claude.zaihuiba.com/claude",
           "type": "string",
           "order": 1
         },
@@ -43,21 +43,35 @@
         "CodeShell.AutoCompletionDelay": {
           "description": "The delay in seconds before automatic code completion triggers.",
           "type": "number",
-          "enum": [1,2,3],
+          "enum": [
+            1,
+            2,
+            3
+          ],
           "default": 1,
           "order": 7
         },
         "CodeShell.CompletionMaxTokens": {
           "description": "Maximum number of tokens for which suggestions will be displayed",
           "type": "number",
-          "enum": [128,256,512,1024],
+          "enum": [
+            128,
+            256,
+            512,
+            1024
+          ],
           "default": 128,
           "order": 8
         },
         "CodeShell.ChatMaxTokens": {
           "description": "Maximum number of tokens for which chat messages will be displayed",
           "type": "number",
-          "enum": [512,1024,2048,4096],
+          "enum": [
+            512,
+            1024,
+            2048,
+            4096
+          ],
           "default": 1024,
           "order": 9
         }

@@ -14,15 +14,17 @@ export async function postCompletion(
     .getConfiguration("CodeShell")
     .get("CompletionMaxTokens") as number;
   let data = {
-    prompt: "|<end>|" + prompt,
-    temperature: 0.2,
-    frequency_penalty: 1.2,
-    stream: false,
-    stop: ["|<end>|"],
-    n_predict: maxtokens,
+    prompt,
+    // prompt: "|<end>|" + prompt,
+    user: "111",
+    // temperature: 0.2,
+    // frequency_penalty: 1.2,
+    // stream: false,
+    // stop: ["|<end>|"],
+    // n_predict: maxtokens,
   };
   const response = await axiosInstance.post<CompletionResponse>(
-    "/completion",
+    "/generate",
     data
   );
   return response.data;

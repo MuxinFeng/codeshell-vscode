@@ -19,12 +19,14 @@ export async function postEventStream(
     .getConfiguration("CodeShell")
     .get("ChatMaxTokens") as number;
   let body = {
-    prompt: "|<end>|" + prompt,
-    temperature: 0.2,
-    frequency_penalty: 1.2,
-    stream: true,
-    stop: ["|<end>|"],
-    n_predict: maxtokens,
+    prompt,
+    // prompt: "|<end>|" + prompt,
+    id: "111",
+    // temperature: 0.2,
+    // frequency_penalty: 1.2,
+    // stream: true,
+    // stop: ["|<end>|"],
+    // n_predict: maxtokens,
   };
   let jsonBody = JSON.stringify(body);
 
@@ -33,7 +35,7 @@ export async function postEventStream(
     .get("ServerAddress") as string;
   abortController = new AbortController();
   new FetchStream({
-    url: address + "/completion",
+    url: address + "/generate",
     requestInit: {
       method: "POST",
       headers: {

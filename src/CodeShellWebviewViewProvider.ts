@@ -149,6 +149,7 @@ export class CodeShellWebviewViewProvider
     } else {
       this._view?.show?.(true);
     }
+    console.warn("prompt", humanPrompt);
     this.startQuestion(humanPrompt);
   }
 
@@ -182,7 +183,7 @@ export class CodeShellWebviewViewProvider
       responseText: chatItem.aiMessage.content,
       aiMsgId: chatItem.aiMsgId,
     };
-    console.log("historyPrompt:", historyPrompt);
+    console.warn("historyPrompt:", historyPrompt);
     postEventStream(
       historyPrompt,
       (data) => {
@@ -191,7 +192,7 @@ export class CodeShellWebviewViewProvider
           chatItem.aiMessage.append(jsonData.content);
         }
         if (jsonData.id && jsonData.id !== "0") {
-          console.log(`AI message id = ${jsonData.id}`);
+          console.warn(`AI message id = ${jsonData.id}`);
           chatItem.aiMsgId = jsonData.id;
         }
         respData.responseText = chatItem.aiMessage.content;
@@ -202,7 +203,7 @@ export class CodeShellWebviewViewProvider
         });
       },
       () => {
-        console.log("generateAnswer.requstsDone:", chatItem.aiMessage.content);
+        console.warn("generateAnswer.requstsDone:", chatItem.aiMessage.content);
         this.sessionStore.update(this.sessionItem);
         this._view?.webview.postMessage({
           type: "responseStreamDone",
